@@ -1,0 +1,110 @@
+kubelet:
+    labels:
+        io.rancher.container.dns: true
+        io.rancher.container.create_agent: true
+        io.rancher.container.agent.role: environment
+        io.rancher.scheduler.global: true
+    command:
+        - /kubelet
+        - --api_servers=http://as-internal.k8s.us:8080
+        - --allow-privileged=true
+        - --containerized=true
+        - --register-node=true
+        - --cloud-provider=rancher
+        - --healthz-bind-address=0.0.0.0
+        - --root-dir=/data/kubelet
+        - --address=0.0.0.0
+        - --enable-server
+        - --maximum-dead-containers-per-container=0
+        - --minimum-container-ttl-duration=1h
+    image: we87/k8s:k8s-1.2.alpha4-rancher-1
+    volumes:
+        - /var/lib/rancher/kubernetes:/var/lib/rancher/kubernetes
+        - /:/rootfs:ro
+        - /sys:/sys:ro
+        - /dev:/dev
+        - /var/run:/var/run
+        - /var/lib/docker/:/var/lib/docker
+        - /data/kubelet:/data/kubelet
+    net: host
+    pid: host
+    ipc: host
+    privileged: true
+    links:
+        - api-server:as-internal.k8s.us
+
+proxy:
+    labels:
+        io.rancher.container.dns: true
+        io.rancher.scheduler.global: true
+    command:
+        - /kube-proxy
+        - --master=http://as-internal.k8s.us:8080
+        - --v=2
+        - --healthz-bind-address=0.0.0.0
+    image: we87/k8s:k8s-1.2.alpha4-rancher-1
+    privileged: true
+    net: host
+    links:
+        - api-server:as-internal.k8s.us
+
+etcd:
+    command:
+        - /usr/local/bin/etcd
+        - --advertise-client-urls=http://etcd:4001
+        - --listen-client-urls=http://0.0.0.0:4001
+        - --data-dir=/var/etcd/data
+    image: gcr.io/google_containers/etcd:2.2.1
+    volumes:
+      - k8s-etcd:/var/etcd/data
+      volume_driver: convoy-gluster
+
+api-server:
+    labels:
+        io.rancher.container.create_agent: true
+        io.rancher.container.agent.role: environment
+    command:
+        - /usr/local/bin/kube-apiserver
+        - --service-cluster-ip-range=10.43.0.0/16
+        - --etcd-servers=http://etcd:4001
+        - --insecure-bind-address=0.0.0.0
+        - --insecure-port=8080
+        - --cloud-provider=rancher
+    image: we87/kube-apiserver:k8s-1.2.alpha4-rancher-1
+    links:
+        - etcd
+
+scheduler:
+    command:
+        - /usr/local/bin/kube-scheduler
+        - --master=http://as-internal.k8s.us:8080
+        - --address=0.0.0.0
+    image: we87/kube-scheduler:k8s-1.2.alpha4-rancher-1
+    links:
+        - api-server:as-internal.k8s.us
+
+controller-manager:
+    labels:
+        io.rancher.container.create_agent: true
+        io.rancher.container.agent.role: environment
+    command:
+        - /usr/local/bin/kube-controller-manager
+        - --master=http://as-internal.k8s.us:8080
+        - --cloud-provider=rancher
+        - --address=0.0.0.0
+    image: we87/kube-controller-manager:k8s-1.2.alpha4-rancher-1
+    links:
+        - api-server:as-internal.k8s.us
+
+rancher-kubernetes-agent:
+    labels:
+        io.rancher.container.create_agent: true
+        io.rancher.container.agent_service.labels_provider: true
+    environment:
+        KUBERNETES_URL: http://as-internal.k8s.us:8080
+    image: we87/k8s-agent:v1
+    privileged: true
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    links:
+        - api-server:as-internal.k8s.us
